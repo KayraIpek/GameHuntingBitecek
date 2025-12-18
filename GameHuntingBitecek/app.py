@@ -123,69 +123,71 @@ def get_itchio_data():
     return games_list
 
 def get_epic_data():
-    """Epic Games - Link Düzeltmeli + İndirimler"""
+    """Epic Games - Gelişmiş Link Düzeltme Modu (404 Önleyici)"""
     games_list = []
     print("\n--- Epic Games Taranıyor ---")
     
-    # BÖLÜM 1: ÜCRETSİZ OYUNLAR
+    # --- 1. ÜCRETSİZ OYUNLAR ---
     try:
-        free_url = "https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions"
-        response = requests.get(free_url, headers=HEADERS, timeout=10)
-        
+        response = requests.get("https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions", headers=HEADERS, timeout=10)
         if response.status_code == 200:
-            data = response.json()
-            elements = data['data']['Catalog']['searchStore']['elements']
+            elements = response.json()['data']['Catalog']['searchStore']['elements']
             print(f"Epic Ücretsiz: {len(elements)} öge bulundu.")
-
+            
             for game in elements:
                 promotions = game.get('promotions')
                 if promotions and promotions.get('promotionalOffers') and len(promotions['promotionalOffers']) > 0:
                     title = game['title']
-                    slug = game.get('productSlug') or game.get('urlSlug')
-                    offer_type = game.get('offerType') 
                     
-                    # LİNK DÜZELTME MANTIĞI
+                    # --- GELİŞMİŞ LİNK BULMA (Deep Search) ---
+                    # 1. Önce standart slug'a bak
+                    slug = game.get('productSlug')
+                    
+                    # 2. Boşsa, urlSlug'a bak
+                    if not slug:
+                        slug = game.get('urlSlug')
+                    
+                    # 3. Hala boşsa, gizli özelliklere (customAttributes) bak
+                    if not slug:
+                        for attr in game.get('customAttributes', []):
+                            if attr.get('key') == 'com.epicgames.app.productSlug':
+                                slug = attr.get('value')
+                                break
+                    
+                    # --- LİNK OLUŞTURMA ---
                     if slug:
+                        offer_type = game.get('offerType')
+                        # Eğer bu bir paketse (Bundle) link yapısı farklıdır
                         if offer_type == 'BUNDLE':
                             link = f"https://store.epicgames.com/bundles/{slug}"
                         else:
                             link = f"https://store.epicgames.com/p/{slug}"
                     else:
+                        # 4. HİÇBİR ŞEY BULUNAMADIYSA -> 404 YERİNE ANA LİSTEYE GİT
+                        # Bu sayede kullanıcı hata sayfası görmez.
                         link = "https://store.epicgames.com/free-games"
+                    # ----------------------------------------
 
                     img_url = ""
                     for img in game.get('keyImages', []):
                         if img.get('type') in ['Thumbnail', 'OfferImageWide', 'DieselStoreFrontWide']:
                             img_url = img.get('url')
                             break
-                    
                     games_list.append({'name': title, 'price': "ÜCRETSİZ", 'image': img_url, 'link': link, 'store': 'epic'})
-    except Exception as e:
-        print(f"Epic Free Hatası: {e}")
+    except Exception as e: print(f"Epic Hata: {e}")
 
-    # BÖLÜM 2: İNDİRİMLİ OYUNLAR
+    # --- 2. İNDİRİMLİ OYUNLAR (CheapShark) ---
     try:
-        cs_url = "https://www.cheapshark.com/api/1.0/deals?storeID=25&pageSize=20&sortBy=Savings"
-        response = requests.get(cs_url, headers=HEADERS, timeout=10)
-        
+        response = requests.get("https://www.cheapshark.com/api/1.0/deals?storeID=25&pageSize=20&sortBy=Savings", headers=HEADERS, timeout=10)
         if response.status_code == 200:
-            deals = response.json()
-            for deal in deals:
-                title = deal.get('title')
-                if any(g['name'] == title for g in games_list): continue
-
-                normal = deal.get('normalPrice')
-                sale = deal.get('salePrice')
-                price_str = f"${normal} -> ${sale}"
-                deal_id = deal.get('dealID')
+            for deal in response.json():
+                if any(g['name'] == deal.get('title') for g in games_list): continue
                 link = f"https://www.cheapshark.com/redirect?dealID={deal.get('dealID')}"
-                
-                games_list.append({'name': title, 'price': price_str, 'image': deal.get('thumb'), 'link': link, 'store': 'epic'})
-    except Exception as e:
-        print(f"CheapShark Hatası: {e}")
-
+                price = f"${deal.get('normalPrice')} -> ${deal.get('salePrice')}"
+                games_list.append({'name': deal.get('title'), 'price': price, 'image': deal.get('thumb'), 'link': link, 'store': 'epic'})
+    except: pass
+    
     return games_list
-
 @app.route('/')
 def index():
     steam = get_steam_data()
@@ -196,3 +198,4 @@ def index():
 if __name__ == '__main__':
     # Port 5001'de çalıştırıyoruz
     app.run(debug=True, port=5001)
+
